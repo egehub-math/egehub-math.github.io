@@ -1,0 +1,13 @@
+import {MathTex} from './FormulaKeyboard';
+import type {Family} from './graph-tools';
+export const families:Record<Family,string>={line:'Прямая',quadratic:'Парабола',reciprocal:'Гипербола',sqrt:'Квадратный корень',exp:'Показательная',log:'Логарифмическая'};
+const theory:Record<Family,{formula:string,text:string,rule:string,detail:string}>={
+ line:{formula:'y=kx+b',text:'k задаёт наклон прямой, b — точку пересечения с осью y. Две точки с различными x однозначно задают прямую.',rule:'k=\\frac{y_2-y_1}{x_2-x_1},\\quad b=y_1-kx_1',detail:'Чтобы найти f(t), подставь t вместо x. Пересечение двух прямых находится из равенства их значений: f(x) = g(x).'},
+ quadratic:{formula:'y=ax^2+bx+c,\\quad a\\ne0',text:'При a > 0 ветви направлены вверх, при a < 0 — вниз. Коэффициент c — значение при x = 0. Три точки с различными x определяют коэффициенты.',rule:'x_{\\text{верш}}=-\\frac{b}{2a}',detail:'Для пересечения с прямой приравняй ax² + bx + c и kx + d. Возможны две точки, одна точка касания или отсутствие пересечений.'},
+ reciprocal:{formula:'y=\\frac{k}{x},\\quad x\\ne0',text:'Произведение координат любой точки графика равно k. При k > 0 ветви лежат в I и III четвертях, при k < 0 — во II и IV.',rule:'k=x_0y_0',detail:'Оси x = 0 и y = 0 — асимптоты при k ≠ 0. В задаче с прямой решай k/x = ax + b и обязательно исключай x = 0.'},
+ sqrt:{formula:'y=a\\sqrt{x},\\quad x\\ge0',text:'График начинается в точке (0; 0). Знак a определяет, вверх или вниз направлена ветвь. Для восстановления a нужна точка с x > 0.',rule:'a=\\frac{y_0}{\\sqrt{x_0}}',detail:'При пересечении с прямой сначала учти область определения и знаки частей. После возведения уравнения в квадрат проверь корни в исходном равенстве.'},
+ exp:{formula:'y=a^x,\\quad a>0,\\ a\\ne1',text:'График проходит через (0; 1), его значения положительны. При a > 1 функция возрастает, при 0 < a < 1 — убывает.',rule:'a=y_0^{1/x_0},\\quad x_0\\ne0',detail:'Отрицательная степень означает обратное число: a⁻ⁿ = 1/aⁿ. Для определения основания по точке необходимо y₀ > 0.'},
+ log:{formula:'y=\\log_a x,\\quad x>0,\\ a>0,\\ a\\ne1',text:'Логарифм отвечает на вопрос: в какую степень нужно возвести основание a, чтобы получить x? График проходит через (1; 0).',rule:'\\log_a x=y\\iff a^y=x',detail:'При a > 1 функция возрастает, при 0 < a < 1 — убывает. По точке с y₀ ≠ 0 основание находится как a = x₀^(1/y₀).'},
+
+};
+export function GraphTheory({family}:{family:Family}){const item=theory[family];return <div className="graphTheory"><div className="eyebrow">ТЕОРИЯ · ЧТЕНИЕ ГРАФИКА</div><h3>{families[family]}</h3><div className="formula"><MathTex value={item.formula}/></div><p>{item.text}</p><div className="formula"><MathTex value={item.rule}/></div><p>{item.detail}</p></div>;}
