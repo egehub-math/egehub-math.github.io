@@ -54,3 +54,39 @@ for(let i=0;i<GORE_COUNT;i++){
 }
 assert(Math.abs(flatArea/(4*Math.PI*radius**2)-1)<.002,'flat gores area');
 console.log('Passed: 30 globe gores, closed seams, planar pointed leaves, intermediate positions and total flat area.');
+
+// All regular bases used by the unified prism and pyramid catalog.
+for(const n of [3,4,5,6])for(const shape of ['prism','oblique','pyramid']){
+ const a=3,h=5,shift=1.7,poly=solid(shape,a,2,h,shift,n),m=metrics(shape,a,2,h,shift,n);
+ const expectedBase=n*a*a/(4*Math.tan(Math.PI/n));
+ near(m.volume,expectedBase*h/(shape==='pyramid'?3:1),'polygon volume');
+ assert.equal(poly.vertices.length,shape==='pyramid'?n+1:2*n);
+ assert.equal(poly.faces.length,shape==='pyramid'?n+1:n+2);
+ const edges=new Map();let area=0,volume=0;
+ const center=poly.vertices.reduce((sum,p)=>sum.add(p),new T.Vector3()).divideScalar(poly.vertices.length);
+ for(const f of poly.faces){
+  for(let j=0;j<f.length;j++){const key=[f[j],f[(j+1)%f.length]].sort((a,b)=>a-b).join(',');edges.set(key,(edges.get(key)||0)+1);}
+  for(let j=1;j<f.length-1;j++){
+   const [p,q,r]=[f[0],f[j],f[j+1]].map(i=>poly.vertices[i]);
+   area+=new T.Vector3().crossVectors(q.clone().sub(p),r.clone().sub(p)).length()/2;
+   volume+=Math.abs(p.clone().sub(center).dot(new T.Vector3().crossVectors(q.clone().sub(center),r.clone().sub(center))))/6;
+  }
+ }
+ edges.forEach(count=>assert.equal(count,2,'closed manifold'));
+ near(area,m.area,shape+n+' surface matches mesh');near(volume,m.volume,shape+n+' volume matches mesh');
+ near(poly.vertices.length-edges.size+poly.faces.length,2,'Euler');
+ for(let i=0;i<n;i++)near(poly.vertices[i].distanceTo(poly.vertices[(i+1)%n]),a,'regular base side');
+ for(const t of [0,.25,.5,.75,1]){
+  const transforms=hingedTransforms(poly,t);
+  poly.faces.forEach((f,i)=>f.forEach((j,k)=>near(poly.vertices[j].distanceTo(poly.vertices[f[(k+1)%f.length]]),poly.vertices[j].clone().applyMatrix4(transforms[i]).distanceTo(poly.vertices[f[(k+1)%f.length]].clone().applyMatrix4(transforms[i])),'new net rigid')));
+  if(t===1)poly.faces.forEach((f,i)=>f.forEach(j=>near(poly.vertices[j].clone().applyMatrix4(transforms[i]).y,-h/2,'new net planar')));
+ }
+}
+const {vertexName,polygonTheory}=await import('../models.ts');
+const {default:katex}=await import('katex');
+for(const n of [3,4,5,6])for(const shape of ['prism','oblique','pyramid']){
+ const theory=polygonTheory(shape,n);
+ for(const key of ['volume','area','base','perimeter','apothem'])katex.renderToString(theory[key],{throwOnError:true});
+ const poly=solid(shape,3,2,5,1,n),labels=poly.vertices.map((_,i)=>vertexName(shape,i,n));assert.equal(new Set(labels).size,labels.length);
+}
+console.log('Passed: all 12 polygonal models, mesh areas/volumes, manifold topology, rigid and planar nets, labels and theory formulas.');
