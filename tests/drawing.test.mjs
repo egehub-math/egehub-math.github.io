@@ -1,0 +1,111 @@
+﻿import assert from 'node:assert/strict';
+import * as T from 'three';
+import {solid} from '../models.ts';
+import {stereoDrawing} from '../stereo-drawing.ts';
+import {anchoredCoordinates,distanceToStroke} from '../drawing-model.ts';
+const near=(a,b)=>assert(Math.abs(a-b)<1e-7,`${a} != ${b}`);
+const host={clientWidth:800,clientHeight:600};
+const camera=new T.PerspectiveCamera(38,800/600,.1,500);camera.position.set(9,7,11);camera.lookAt(0,0,0);camera.updateMatrixWorld();
+const poly=solid('cube',4,4,4),api=stereoDrawing(camera,poly.vertices,poly.faces,host);
+const center={point:[0,2,0]},screen=api.project(center),hit=api.pick(screen.x,screen.y);
+assert(hit?.indices&&hit.weights,'surface hit has durable mesh binding');
+const point=anchoredCoordinates(hit,poly.vertices.map(p=>p.toArray()));point.forEach((v,i)=>near(v,center.point[i]));
+const second=api.pick(screen.x+20,screen.y+12,hit);assert(second);near(anchoredCoordinates(second,poly.vertices.map(p=>p.toArray()))[1],2);
+for(const position of [[10,3,-7],[-7,9,8],[1,12,14]]){
+ camera.position.set(...position);camera.lookAt(0,0,0);camera.updateMatrixWorld();
+ const actual=api.project(hit),expected=new T.Vector3(...point).project(camera);near(actual.x,(expected.x+1)*400);near(actual.y,(1-expected.y)*300);
+}
+const larger=solid('cube',8,4,4),scaled=anchoredCoordinates(hit,larger.vertices.map(p=>p.toArray()));scaled.forEach((v,i)=>near(v,point[i]*2));
+const vertex={point:poly.vertices[6].toArray(),indices:[6],weights:[1]};
+assert.deepEqual(anchoredCoordinates(vertex,larger.vertices.map(p=>p.toArray())),larger.vertices[6].toArray());
+assert.equal(anchoredCoordinates({point:[0,0,0],indices:[100],weights:[1]},[]),null);
+assert.equal(api.pick(-1000,-1000),null);
+near(distanceToStroke({x:5,y:3},[{x:0,y:0},{x:10,y:0}]),3);
+near(distanceToStroke({x:10,y:0},[{x:0,y:0}]),10);
+assert.deepEqual(anchoredCoordinates({point:[2,3]},[]),[2,3]);
+console.log('Passed: face-plane drawing, barycentric anchors, camera rotation, dimension changes, vertex binding and eraser hit distance.');
+const {midpointAnchor}=await import('../drawing-model.ts');
+const midpoint=midpointAnchor({point:[0,0,0],indices:[0],weights:[1]},{point:[4,0,0],indices:[1],weights:[1]});
+assert.deepEqual(anchoredCoordinates(midpoint,[[0,0,0],[8,0,0]]),[4,0,0]);
+assert.deepEqual(midpointAnchor({point:[1,2]},{point:[3,4]}).point,[2,3]);
+console.log('Passed: labels can bind to existing stroke points and segment midpoints.');
+const {drawingIntent,historyShortcut,shouldSelectSurface,sweepHitsStroke,drawingEndpoint}=await import('../drawing-model.ts');
+for(const tool of ['pen','marker','line','arrow','text','textMove','erase','move']){
+ assert.equal(drawingIntent(2,false,tool),'navigate','right button never draws');
+ assert.equal(drawingIntent(0,true,tool),'navigate','Shift always navigates');
+ assert.equal(drawingIntent(1,false,tool),'ignore','middle button never draws');
+}
+assert.equal(drawingIntent(0,false,'pen'),'draw');
+assert.equal(historyShortcut('z',true,false,false,false),'undo');
+assert.equal(historyShortcut('z',false,true,false,false),'undo');
+assert.equal(historyShortcut('Z',false,true,true,false),'redo');
+assert.equal(historyShortcut('y',true,false,false,false),'redo');
+assert.equal(historyShortcut('z',false,false,false,false),null);
+assert.equal(historyShortcut('z',true,false,false,true),null);
+assert.equal(shouldSelectSurface(api,null,hit),true,'first contact selects a plane');
+assert.equal(shouldSelectSurface(api,hit,hit),false,'second contact on the same face draws');
+const another={point:[2,0,0],indices:[1,2,6],planeIndices:[1,2,6],weights:[.5,.5,0]};
+assert.equal(shouldSelectSurface(api,hit,another),true,'another face is selected without a mark');
+assert.equal(shouldSelectSurface({pick:()=>null,project:()=>null},null,null),false,'graphs do not require face selection');
+assert(sweepHitsStroke({x:-100,y:0},{x:100,y:0},[{x:0,y:-100},{x:0,y:100}],0),'fast eraser crossing is detected');
+assert(!sweepHitsStroke({x:0,y:0},{x:10,y:0},[{x:20,y:20},{x:30,y:20}],3));
+const erased=[-5,0,5].filter(x=>!sweepHitsStroke({x:-10,y:0},{x:10,y:0},[{x,y:-10},{x,y:10}],1));assert.equal(erased.length,0,'multiple segments erased in one pass');
+for(const t of [.01,.25,.5,.99])assert.equal(drawingEndpoint(true,t,false),false);
+for(const t of [0,1]){assert(drawingEndpoint(true,t,false));assert(!drawingEndpoint(true,t,true));}
+const {unfoldedDrawing}=await import('../stereo-drawing.ts');
+const {polyUnfold,curvedUnfold}=await import('../unfolding.ts');
+const {globeUnfold}=await import('../globe.ts');
+for(const net of [polyUnfold(solid('cube',4,4,4)),polyUnfold(solid('pyramid',3,3,5,0,6)),curvedUnfold('cylinder',2,5),curvedUnfold('cone',2,5),globeUnfold(2)])for(const t of [0,1]){
+ net.update(t);net.group.updateMatrixWorld(true);const box=new T.Box3().setFromObject(net.group),center=box.getCenter(new T.Vector3()),extent=Math.max(...box.getSize(new T.Vector3()).toArray(),5);
+ camera.position.copy(center).add(new T.Vector3(extent,extent*1.7,extent));camera.lookAt(center);camera.updateMatrixWorld();
+ const draw=unfoldedDrawing(net.group,camera,host);let successes=0;
+ net.group.traverse(object=>{if(successes||!(object instanceof T.Mesh))return;const geometry=object.geometry,pos=geometry.getAttribute('position'),index=geometry.getIndex();
+  for(let i=0;i<(index?.count??pos.count);i+=3){const triangle=[0,1,2].map(j=>new T.Vector3().fromBufferAttribute(pos,index?index.getX(i+j):i+j).applyMatrix4(object.matrixWorld));if(new T.Triangle(...triangle).getArea()<1e-8)continue;const point=triangle.reduce((a,b)=>a.add(b),new T.Vector3()).divideScalar(3),screen=draw.project({point:point.toArray()}),anchor=draw.pick(screen.x,screen.y,undefined,false);if(!anchor)continue;const back=draw.project(anchor);near(back.x,screen.x);near(back.y,screen.y);assert(anchor.planeIndices?.length===3);successes++;break;}
+ });assert(successes,'visible geometry is pickable at net endpoint '+t);
+ net.group.traverse(object=>{if(object instanceof T.Mesh||object instanceof T.Line){object.geometry.dispose();}});
+}
+console.log('Passed: plane-selection gating, mouse/Shift routing, Ctrl/Cmd history, continuous eraser sweeps and all unfolded endpoint adapters.');
+assert.equal(historyShortcut('я',true,false,false,false),'undo');
+assert.equal(historyShortcut('Я',false,true,false,false),'undo');
+assert.equal(historyShortcut('я',true,false,true,false),'redo');
+assert.equal(historyShortcut('н',true,false,false,false),'redo');
+assert.equal(historyShortcut('unrelated',true,false,false,false,'KeyZ'),'undo');
+assert.equal(historyShortcut('unrelated',false,true,true,false,'KeyZ'),'redo');
+const {eraserCapsule,createEraserCut}=await import('../drawing-model.ts');
+const circle=eraserCapsule({x:20,y:30},{x:20,y:30},14);circle.forEach(p=>near(Math.hypot(p.x-20,p.y-30),14));
+const swept=eraserCapsule({x:0,y:0},{x:100,y:0},12);assert(Math.min(...swept.map(p=>p.x))<=-11.99);assert(Math.max(...swept.map(p=>p.x))>=111.99);
+const body=solid('cube',4,4,4),net=polyUnfold(body),pointOnTop=new T.Vector3(.4,2,.2);
+camera.position.set(9,7,11);camera.lookAt(0,0,0);camera.updateMatrixWorld();net.update(0);let closedApi=unfoldedDrawing(net.group,camera,host);
+const topPixel=closedApi.project({point:pointOnTop.toArray()}),bound=closedApi.pick(topPixel.x,topPixel.y,undefined,false);assert(bound);
+const cut=createEraserCut(closedApi,bound,topPixel,topPixel,14);assert(cut?.length>20);
+cut.forEach((a,i)=>{const p=closedApi.project(a);near(Math.hypot(p.x-topPixel.x,p.y-topPixel.y),14);});
+net.update(1);const flatApi=unfoldedDrawing(net.group,camera,host),transforms=(await import('../unfolding.ts')).hingedTransforms(body,1);
+const expectedFlat=pointOnTop.clone().applyMatrix4(transforms[1]).project(camera),flatPixel=flatApi.project(bound);near(flatPixel.x,(expectedFlat.x+1)*400);near(flatPixel.y,(1-expectedFlat.y)*300);
+// The same stroke and its erasure masks travel to the matching physical face in both directions.
+const returnedApi=(()=>{net.update(0);return unfoldedDrawing(net.group,camera,host);})();
+near(returnedApi.project(bound).x,topPixel.x);near(returnedApi.project(bound).y,topPixel.y);
+cut.forEach((anchor,i)=>{const p=returnedApi.project(anchor);near(Math.hypot(p.x-topPixel.x,p.y-topPixel.y),14);});
+// Different panels in a flat net remain distinct surfaces although their planes coincide.
+net.update(1);const flatAgain=unfoldedDrawing(net.group,camera,host);
+assert.notEqual(flatAgain.surfaceKey({...bound,surface:0}),flatAgain.surfaceKey({...bound,surface:1}));
+const flatHit=flatAgain.pick(flatPixel.x,flatPixel.y,undefined,false);assert(flatHit);const roundtrip=returnedApi.project(flatHit);near(roundtrip.x,topPixel.x);near(roundtrip.y,topPixel.y);
+assert.equal(createEraserCut({pick:()=>null,project:()=>null},bound,topPixel,topPixel,14),null);
+console.log('Passed: Russian/physical undo keys, adjustable circular pixel masks, and bidirectional stroke/mask synchronization across net endpoints.');
+const {splitErasedItem}=await import('../drawing-model.ts');
+const planeApi={pick:(x,y)=>({point:[x,y]}),project:a=>({x:a.point[0],y:a.point[1]})};
+const stroke={id:100,kind:'line',anchors:[{point:[0,0]},{point:[100,0]}],width:3,color:'#000',cuts:[createEraserCut(planeApi,{point:[0,0]},{x:50,y:0},{x:50,y:0},10)]};
+let fragmentId=200;const before=JSON.stringify(stroke),halves=splitErasedItem(stroke,planeApi,()=>fragmentId++);
+assert.equal(halves.length,2,'erasing the middle produces two objects');assert.notEqual(halves[0].id,halves[1].id);
+assert.equal(JSON.stringify(stroke),before,'original remains intact for undo');
+const survivors=halves.filter(item=>!sweepHitsStroke({x:20,y:0},{x:20,y:0},item.anchors.map(a=>planeApi.project(a)),4));
+assert.equal(survivors.length,1,'object eraser deletes only the touched half');assert.equal(survivors[0].anchors.at(-1).point[0],100);
+assert.equal(splitErasedItem(halves[0],planeApi,()=>fragmentId++).length,1,'fragments do not repeatedly split');
+const three=splitErasedItem({...stroke,cuts:[30,70].map(x=>createEraserCut(planeApi,{point:[0,0]},{x,y:0},{x,y:0},10))},planeApi,()=>fragmentId++);
+assert.equal(three.length,3,'two cuts produce three independent objects');
+const grazing=splitErasedItem({...stroke,cuts:[createEraserCut(planeApi,{point:[0,0]},{x:50,y:10},{x:50,y:10},10)]},planeApi,()=>fragmentId++);
+assert.equal(grazing.length,1,'a side scratch must not disconnect the object');
+assert.equal(splitErasedItem({...stroke,cuts:[createEraserCut(planeApi,{point:[0,0]},{x:0,y:0},{x:100,y:0},10)]},planeApi,()=>fragmentId++).length,0,'fully erased strokes disappear');
+const arrowParts=splitErasedItem({...stroke,kind:'arrow'},planeApi,()=>fragmentId++);assert.equal(arrowParts[0].kind,'line');assert.equal(arrowParts[1].kind,'arrow');
+const penParts=splitErasedItem({...stroke,kind:'pen',anchors:[0,25,50,75,100].map(x=>({point:[x,0]}))},planeApi,()=>fragmentId++);assert.equal(penParts.length,2);
+const markerUncut=splitErasedItem({...stroke,kind:'marker',width:5},planeApi,()=>fragmentId++);assert.equal(markerUncut.length,1,'wide marker with a narrow scratch stays connected');
+console.log('Passed: pixel erasure splits independent line/pen fragments, subsequent object erasure keeps the other half, grazing cuts stay connected, and arrowheads/history survive.');
